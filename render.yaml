@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: compliflow-lite
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      python -c "from app import db, rag; db.init_db(); print('chunks:', rag.ingest())"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: NVIDIA_API_KEY
+        sync: false
+    disk:
+      name: compliflow-storage
+      mountPath: /app/storage
+      sizeGB: 1
+    healthCheckPath: /api/health
