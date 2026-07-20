@@ -42,12 +42,43 @@ def main() -> int:
             ok &= match
             detail.append(f"status {got} {'==' if match else '!='} {c['expect_status']}")
 
+        if "expect_mode" in c:
+            got = res.get("mode", "workflow")
+            match = got == c["expect_mode"]
+            ok &= match
+            detail.append(f"mode {got} {'==' if match else '!='} {c['expect_mode']}")
+
+        if "expect_answer_contains" in c:
+            ans = (res.get("answer") or "").lower()
+            needles = [n.lower() for n in c["expect_answer_contains"]]
+            hit = any(n in ans for n in needles)
+            ok &= hit
+            detail.append(f"answer has one of {c['expect_answer_contains']}: {hit}")
+
         if "expect_approvers" in c:
             got = {a["approver_role"] for a in res.get("approvals", [])}
             want = set(c["expect_approvers"])
             match = want.issubset(got)
             ok &= match
             detail.append(f"approvers {'⊇' if match else '⊉'} {sorted(want)} (got {sorted(got)})")
+
+        if "expect_type" in c:
+            got = (res.get("workflow") or {}).get("workflow_type")
+            match = got == c["expect_type"]
+            ok &= match
+            detail.append(f"type {got} {'==' if match else '!='} {c['expect_type']}")
+
+        if "expect_tools" in c:
+            got = [t["tool_name"] for t in res.get("tool_calls", []) if t["status"] == "executed"]
+            match = all(t in got for t in c["expect_tools"])
+            ok &= match
+            detail.append(f"tools {'⊇' if match else '⊉'} {c['expect_tools']} (got {got})")
+
+        if c.get("expect_no_approvers"):
+            got = [a["approver_role"] for a in res.get("approvals", [])]
+            match = len(got) == 0
+            ok &= match
+            detail.append(f"no approvers ({'ok' if match else got})")
 
         if c.get("expect_blocked_tools") == []:
             blocked = [t["tool_name"] for t in res.get("tool_calls", []) if t["status"] == "blocked"]

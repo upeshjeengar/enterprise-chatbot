@@ -63,7 +63,8 @@ def chat(
                     json=payload,
                 )
             if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
+                content = r.json()["choices"][0]["message"].get("content")
+                return content or ""  # NIM may return null content on empty completions
             last_err = LLMError(f"NIM {r.status_code}: {r.text[:300]}")
         except Exception as e:  # noqa: BLE001 - surface after retries
             last_err = e

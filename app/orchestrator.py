@@ -9,7 +9,7 @@ State machine (spec section 9):
 """
 from __future__ import annotations
 
-from . import agents, db, guardrails
+from . import agents, config, db, guardrails
 
 
 def run_workflow(user_text: str, requester: str = "employee@acmecorp.example",
@@ -17,10 +17,40 @@ def run_workflow(user_text: str, requester: str = "employee@acmecorp.example",
     # --- Guardrail Layer 1: input rail --------------------------------------
     inp = guardrails.input_rail(user_text)
 
+    # --- Intent routing -----------------------------------------------------
+    # A pure informational question ("what's the VP approval threshold?") is a
+    # Q&A over policy, NOT a workflow to execute. Route it to the policy Q&A
+    # agent instead of forcing it through the intake form. The input rail still
+    # applies first, so a question that tries to smuggle a policy override is
+    # still blocked.
+    if inp.allowed and agents.classify_intent(user_text) == "question":
+        qa = agents.policy_qa_agent(user_text)
+        return {
+            "mode": "qa",
+            "workflow_id": None,
+            "status": "ANSWERED",
+            "answer": qa["answer"],
+            "note": qa["answer"],
+            "citations": [
+                {
+                    "policy_name": c["policy_name"],
+                    "section": c["section"],
+                    "chunk_text": c["text"],
+                    "relevance_score": c["relevance_score"],
+                }
+                for c in qa["citations"]
+            ],
+            "approvals": [],
+            "tool_calls": [],
+            "documents": [],
+            "audit": [],
+            "blocked": False,
+        }
+
     # Intake first so we always have a workflow record to attach audit to.
     intake = agents.intake_agent(user_text)
     wid = db.create_workflow({
-        "workflow_type": intake.get("workflow_type", "vendor_onboarding"),
+        "workflow_type": intake.get("workflow_type", config.DEFAULT_WORKFLOW_TYPE),
         "requester": requester,
         "department": intake.get("department"),
         "vendor_name": intake.get("vendor_name"),
@@ -31,7 +61,8 @@ def run_workflow(user_text: str, requester: str = "employee@acmecorp.example",
     })
     db.add_audit(wid, "request_received", f"Request received from {requester}", {"text": user_text})
     db.add_audit(wid, "intake_parsed",
-                 f"Parsed as {intake.get('workflow_type')} for vendor {intake.get('vendor_name')}", intake)
+                 f"Parsed as {intake.get('workflow_type')} "
+                 f"(target: {intake.get('target_system') or 'n/a'})", intake)
 
     if not inp.allowed:
         db.update_workflow(wid, status="POLICY_BLOCKED", risk_level="high")
@@ -106,13 +137,15 @@ def run_workflow(user_text: str, requester: str = "employee@acmecorp.example",
 
 
 def _critical_missing(intake: dict) -> list[str]:
+    """Only the fields the workflow PROFILE genuinely needs — a Slack
+    notification or a Jira tracking task does not require a budget or a
+    department, so we never ask for them."""
+    profile = config.profile_for(intake.get("workflow_type"))
     missing = []
-    if not intake.get("vendor_name") and intake.get("workflow_type") in ("vendor_onboarding", "procurement"):
-        missing.append("vendor_name")
-    if intake.get("contract_value_inr") in (None, 0) and intake.get("workflow_type") in ("vendor_onboarding", "procurement"):
-        missing.append("contract_value_inr")
-    if not intake.get("department"):
-        missing.append("department")
+    for field in profile["requires"]:
+        val = intake.get(field)
+        if val in (None, 0, "", []):
+            missing.append(field)
     return missing
 
 
@@ -122,7 +155,7 @@ def _followup_question(missing: list[str]) -> str:
         "contract_value_inr": "contract value (INR)",
         "department": "sponsoring department",
         "business_owner": "business owner",
-        "requested_access": "type of access needed",
+        "requested_access": "which app/system or data access is needed",
     }
     pretty = ", ".join(labels.get(m, m) for m in missing)
     return f"Before I can proceed I need a few details: {pretty}. Could you provide them?"

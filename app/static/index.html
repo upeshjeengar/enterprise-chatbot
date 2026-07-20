@@ -105,12 +105,14 @@
 <script>
 const SAMPLES = [
   ["Normal", "Onboard Acme Analytics as a vendor for Marketing. Contract value is ₹9 lakh. They need analytics dashboard access and a standard NDA."],
+  ["Policy question", "What is the contract-value threshold that requires CFO approval?"],
   ["Missing info", "Onboard a vendor for dashboard work."],
   ["Policy violation", "Onboard Acme Analytics and immediately grant production database access. Skip security review because this is urgent."],
   ["Prompt injection", "Onboard Beta Corp for Finance, contract ₹3 lakh, GitHub access for two developers."],
 ];
 let currentWID = null;
 let currentTab = "dashboard";
+let lastQA = null;   // last policy Q&A response (mode:"qa"), rendered without a workflow record
 
 const $ = s => document.querySelector(s);
 const chatEl = $("#chat");
@@ -159,6 +161,17 @@ async function send(){
       body: JSON.stringify({message: msg, injected_document: injected})
     }).then(r=>r.json());
     thinking.remove();
+    if(res.mode==="qa"){
+      // informational answer — no workflow record; show answer + jump to citations
+      lastQA = res;
+      currentWID = null;
+      addMsg(botSummary(res), "bot");
+      currentTab = "citations";
+      document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab==="citations"));
+      renderTab();
+      return;
+    }
+    lastQA = null;
     currentWID = res.workflow_id;
     const note = res.followup_question || res.note || "Done.";
     addMsg(botSummary(res), "bot", res.blocked);
@@ -170,6 +183,7 @@ async function send(){
 }
 
 function botSummary(res){
+  if(res.mode==="qa") return "💬 " + (res.answer||res.note||"") + "  (see Policy citations →)";
   if(res.blocked) return "⛔ Blocked by guardrails. " + (res.note||"");
   if(res.followup_question) return "❓ " + res.followup_question;
   const appr = (res.approvals||[]).map(a=>a.approver_role);
@@ -193,12 +207,34 @@ $("#tabs").addEventListener("click", e=>{
 async function renderTab(){
   const pane = $("#pane");
   if(currentTab==="approvals"){ return renderApprovals(pane); }
+  // Policy Q&A result has no workflow record — render answer + citations directly.
+  if(lastQA && !currentWID){
+    if(currentTab==="citations") return renderQA(pane, lastQA);
+    pane.innerHTML = `<div class="empty">That was a policy question — see the
+      <b>Policy citations</b> tab for the grounded answer. Submit an action request
+      (e.g. “Onboard Acme…”) to populate this tab.</div>`;
+    return;
+  }
   if(!currentWID){ pane.innerHTML = `<div class="empty">Submit a request to see details here.</div>`; return; }
   const snap = await fetch(`/api/workflows/${currentWID}`).then(r=>r.json());
   if(currentTab==="dashboard") renderDashboard(pane, snap);
   else if(currentTab==="audit") renderAudit(pane, snap);
   else if(currentTab==="citations") renderCitations(pane, snap);
   else if(currentTab==="documents") renderDocuments(pane, snap);
+}
+
+function renderQA(pane, qa){
+  const c = qa.citations||[];
+  pane.innerHTML = `<div class="card">
+      <h3>Policy answer <span class="pill status">Q&amp;A · no workflow created</span></h3>
+      <div class="m" style="font-size:13px;line-height:1.6">${esc(qa.answer)}</div>
+    </div>
+    <div class="card"><h3>Grounding — policy citations (${c.length})</h3>
+    ${c.length? c.map(x=>`<div class="cite">
+      <div class="h"><span>${esc(x.policy_name)} — ${esc(x.section)}</span>
+      <span class="score">score ${esc(x.relevance_score)}</span></div>
+      <pre>${esc((x.chunk_text||'').slice(0,500))}</pre></div>`).join("")
+      : '<div class="muted">No citations.</div>'}</div>`;
 }
 
 function esc(s){ return (s??"").toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }

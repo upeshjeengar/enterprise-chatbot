@@ -41,5 +41,86 @@ HIGH_RISK_ACCESS = {"production", "production_database", "prod_db", "payments", 
 SENSITIVE_ACCESS = {"analytics_dashboard", "customer_pii", "customer_analytics", "financials"}
 
 
+# ---- Workflow-type profiles ------------------------------------------------
+# The pipeline is multi-purpose: it handles low-touch actions (log a ticket,
+# post a notification) as well as high-governance ones (onboard a vendor, grant
+# access). Requirements/approvals must depend on WHAT was asked, not be a single
+# vendor-onboarding template applied to everything. Each profile declares:
+#   requires        : fields that genuinely block this action if absent
+#   spend_gate      : does a contract/spend value trigger financial approval?
+#   needs_business_owner : does a business-owner sign-off apply?
+#   tool            : the primary mock system this request drives
+#   label           : human-readable name
+DEFAULT_WORKFLOW_TYPE = "general_request"
+
+WORKFLOW_PROFILES: dict[str, dict] = {
+    # --- low-touch operational actions (no budget / no department needed) ---
+    "notification": {
+        "label": "Notification / alert",
+        "requires": [],
+        "spend_gate": False,
+        "needs_business_owner": False,
+        "tool": "send_notification",
+    },
+    "project_task": {
+        "label": "Project / tracking task",
+        "requires": [],
+        "spend_gate": False,          # spend only matters if the user states one
+        "needs_business_owner": False,
+        "tool": "create_project_task",
+    },
+    "it_service_request": {
+        "label": "IT service request (ITSM)",
+        "requires": [],
+        "spend_gate": False,
+        "needs_business_owner": False,
+        "tool": "create_itsm_ticket",
+    },
+    # --- access governance ---
+    "it_access_request": {
+        "label": "IT access request",
+        "requires": ["requested_access"],
+        "spend_gate": False,
+        "needs_business_owner": False,
+        "tool": "create_access_request",
+    },
+    "software_license": {
+        "label": "Software license request",
+        "requires": [],
+        "spend_gate": True,
+        "needs_business_owner": False,
+        "tool": "create_purchase_request",
+    },
+    # --- procurement / vendor (high governance) ---
+    "procurement": {
+        "label": "Procurement / purchase",
+        "requires": ["contract_value_inr"],
+        "spend_gate": True,
+        "needs_business_owner": False,
+        "tool": "create_purchase_request",
+    },
+    "vendor_onboarding": {
+        "label": "Vendor onboarding",
+        "requires": ["vendor_name", "contract_value_inr"],
+        "spend_gate": True,
+        "needs_business_owner": True,
+        "tool": "create_purchase_request",
+    },
+    # --- fallback ---
+    DEFAULT_WORKFLOW_TYPE: {
+        "label": "General request",
+        "requires": [],
+        "spend_gate": True,           # if they mention money, gate it; else don't
+        "needs_business_owner": False,
+        "tool": "send_notification",
+    },
+}
+
+
+def profile_for(workflow_type: str | None) -> dict:
+    """Return the workflow profile, defaulting gracefully for unknown types."""
+    return WORKFLOW_PROFILES.get(workflow_type or "", WORKFLOW_PROFILES[DEFAULT_WORKFLOW_TYPE])
+
+
 def has_api_key() -> bool:
     return NVIDIA_API_KEY.startswith("nvapi-")

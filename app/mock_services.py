@@ -94,6 +94,36 @@ def send_notification(workflow_id: str, to_role: str, message: str) -> dict:
     }
 
 
+# --- project tracking (Jira mock) -----------------------------------------
+def create_project_task(workflow_id: str, project: str, summary: str,
+                        issue_type: str = "Task") -> dict:
+    key = (project or "TASK").upper().split()[0]
+    ticket = f"{key}-" + db.new_id()[:4].upper()
+    return {
+        "system": "Jira Software (mock)",
+        "site": _integration("jira").get("base_url", "https://acmecorp.atlassian.net"),
+        "ticket_id": ticket,
+        "project": key,
+        "issue_type": issue_type,
+        "summary": summary,
+        "status": "created",
+    }
+
+
+# --- IT service management (ServiceNow mock) ------------------------------
+def create_itsm_ticket(workflow_id: str, short_description: str,
+                       category: str = "hardware") -> dict:
+    ticket = "INC-" + db.new_id()[:6].upper()
+    return {
+        "system": "ServiceNow ITSM (mock)",
+        "instance": _integration("servicenow").get("instance", "https://acmecorp.service-now.com"),
+        "ticket_id": ticket,
+        "short_description": short_description,
+        "category": category,
+        "status": "new",
+    }
+
+
 # --- registry: name -> (callable, risk, needs_human_approval) -------------
 # High-risk tools are recorded but BLOCKED from executing their real effect.
 TOOL_RISK = {
@@ -101,6 +131,8 @@ TOOL_RISK = {
     "create_legal_review": ("low", False),
     "create_security_review": ("low", False),
     "create_access_request": ("medium", False),   # creates request only; provisioning blocked
+    "create_project_task": ("low", False),
+    "create_itsm_ticket": ("low", False),
     "send_notification": ("low", False),
     # hard-blocked effects
     "provision_access": ("high", True),
