@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db
+from . import config, db, mock_services
 from .orchestrator import (
     continue_after_approvals,
     get_snapshot,
@@ -49,6 +49,15 @@ def health() -> dict:
         "fast_model": config.FAST_MODEL,
         "reasoning_model": config.REASONING_MODEL,
         "embedding_model": config.EMBEDDING_MODEL,
+    }
+
+
+@app.get("/api/integrations")
+def integrations() -> dict:
+    """Catalog of simulated enterprise endpoints (mock, in-process)."""
+    return {
+        "systems": mock_services.SUPPORTED_ENDPOINTS,
+        "tools": sorted(mock_services.TOOL_RISK.keys()),
     }
 
 
